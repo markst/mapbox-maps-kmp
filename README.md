@@ -15,12 +15,12 @@ graph TD
   ios["iosMain: actual — extends shim"]
   maven["com.mapbox.maps:android:11.27.1 (Maven)"]
   shim["MapboxShim @objc Swift package (local)"]
-  sdkios["submodules/mapbox-maps-ios @ v11.26.0"]
+  sdkios["mapbox-maps-ios @ 11.26.0 (remote SPM)"]
   common --> android
   common --> ios
   android --> maven
   ios -->|"swiftPMImport cinterop"| shim
-  shim -->|".package(path:)"| sdkios
+  shim -->|".package(url:, exact:)"| sdkios
 ```
 
 ## Version matrix
@@ -35,18 +35,16 @@ graph TD
 mapbox-maps-kmp/
 ├── Package.swift               # repo is also a consumable Swift package (see below)
 ├── settings.gradle.kts, build.gradle.kts, gradle/libs.versions.toml
-├── submodules/
-│   ├── mapbox-maps-ios/         # @ v11.26.0  (in the build — see mapbox/native/Package.swift)
-│   └── mapbox-maps-android/     # @ v11.27.1  (reference only; the release .aar is used instead)
 ├── mapbox/                      # the KMP library
 │   ├── build.gradle.kts
-│   ├── native/Package.swift     # local SPM package, consumed via swiftPMDependencies
+│   ├── native/Package.swift     # local SPM package, consumed via swiftPMDependencies;
+│   │                            #   itself depends on mapbox-maps-ios @ 11.26.0 (remote)
 │   ├── native/MapboxShim/*.swift
 │   └── src/{commonMain,androidMain,iosMain}/kotlin
 └── demo/                        # Compose Multiplatform demo app
     ├── shared/                  # shared composable (DemoScreen, MapboxMapView expect/actual)
     ├── androidApp/               # Android application module
-    └── iosApp/                   # Xcode project (generated via xcodegen — see below)
+    └── iosApp/                   # Xcode project (checked in — see below)
 ```
 
 ## v0 API surface
@@ -95,29 +93,35 @@ Still, the token is wired as optional-but-supported rather than ignored: the doc
 
 Either way: `.gitignore` covers `local.properties`, `*.xcconfig` (except `*.xcconfig.example`), and `.netrc`. No secret ever touches a tracked file, and the Gradle build works fully anonymously today.
 
-## Submodules vs. versioning
+## Versioned dependencies, not submodules
 
-Split by platform rather than answered once:
+Both platforms pin to a released version rather than vendoring source in the repo:
 
-- **iOS: submodule, in the build.** `mapbox/native/Package.swift` depends on `submodules/mapbox-maps-ios` via `.package(path:)`, which resolves to whatever commit the submodule is checked out at — a stricter pin than a semver range. This also dodges a real trap: `Package.swift` on `mapbox-maps-ios`'s `main` branch pins SNAPSHOT builds of `MapboxCommon`/`MapboxCoreMaps`, while tagged releases (like `v11.26.0`) pin real ones — so pinning to a tag is mandatory either way, and a submodule makes that pin explicit and reviewable in `git diff`. SwiftPM runs `git submodule update --init --recursive` on checkout, so consumers of the published root `Package.swift` still resolve the tree correctly.
-- **Android: submodule, out of the build.** Reference source only — see below for why.
+- **iOS**: `mapbox/native/Package.swift` depends on `mapbox-maps-ios` via a plain remote SwiftPM package pin:
 
-**The versioned alternative, for iOS.** `mapbox/native/Package.swift`'s single `.package(path:)` line is the only thing that would need to change to drop the submodule and depend on a released tag remotely instead:
+  ```swift
+  .package(url: "https://github.com/mapbox/mapbox-maps-ios.git", exact: "11.26.0")
+  ```
 
-```swift
-.package(url: "https://github.com/mapbox/mapbox-maps-ios.git", from: "11.26.0")
-```
+  `exact:`, not `from:` — the point is a single, deliberately-bumped pin (reviewable as a one-line `git diff`), not a floating semver range that could silently resolve to a newer tag on a clean checkout. This still has to target a tagged release rather than `main`: `Package.swift` on `mapbox-maps-ios`'s `main` branch pins SNAPSHOT builds of `MapboxCommon`/`MapboxCoreMaps`, while tagged releases (like `v11.26.0`) pin real ones. Verified end to end — `swift package resolve` against this exact manifest resolves `mapbox-maps-ios` to revision `b5322aad...` (the same commit `v11.26.0` names) with real, non-SNAPSHOT `MapboxCommon`/`MapboxCoreMaps` binary artifacts. The resulting pin is what ends up in `.swiftpm-locks/default/swiftImport/Package.resolved`, which is tracked in git for reproducible resolution (see `.gitignore`'s comment on it); the SwiftPM checkout/artifact cache alongside it under `.swiftpm-locks/*/swiftPMCheckout/` is not — that's hundreds of MB of re-fetchable source and binaries, explicitly gitignored.
+- **Android**: unchanged by any of this — `api("com.mapbox.maps:android:11.27.1")` from Mapbox's Maven repo, as it always was.
 
-Both forms give the same strictness — a submodule pointer and a semver `from:` constraint are each pinned to one resolvable commit once `Package.resolved` is generated, and both must target a tag rather than `main` to avoid the SNAPSHOT-binary trap above. The difference is purely local availability of source: a submodule gives you `rg`-able source at that exact version on disk (the agentic argument above); a remote package gives you a smaller `git clone` and no submodule bookkeeping, at the cost of needing to re-clone or dig through SwiftPM's package cache any time you need to read the API you're binding to. This repo picked the submodule; swapping the one line above is all it'd take to go the other way.
+### The submodule alternative — considered, not taken
 
-**The agentic argument**, worth stating plainly: the hard part here isn't writing Kotlin, it's knowing the native API surface — which Swift symbols exist at a given version, and which are generic- or protocol-typed and therefore can't cross into `@objc` at all (Kotlin/Native cinterop only binds Objective-C). With a submodule, that question is `rg` against local source at the *exact pinned version*. With a versioned binary dependency, there's nothing to read locally, and documentation lags releases — which is exactly the trap that cost people weeks of dead-end debugging in the linked issue. The cost is honest: a few hundred MB of clone, and submodule pointers that must be bumped deliberately. Worth it for a repo whose entire job is mirroring someone else's API.
+An earlier version of this repo vendored `mapbox-maps-ios` (and, reference-only, `mapbox-maps-android`) as git submodules instead of the versioned dependencies above. The argument for that approach is worth keeping on record, because it's really an argument about *agent* context, not the build:
 
-**Why Android's submodule stays out of the build**: linking it would mean a Gradle composite build — `includeBuild("submodules/mapbox-maps-android") { dependencySubstitution { substitute(module("com.mapbox.maps:android")).using(project(":maps-sdk")) } }` — plus its nested `pluginManagement { includeBuild("mapbox-convention-plugin") }`, which Gradle does support chaining through. Two things make it not worth doing:
+The hard part of this repo isn't writing Kotlin, it's knowing the native API surface — which Swift symbols exist at a given version, and which are generic- or protocol-typed and therefore can't cross into `@objc` at all (Kotlin/Native cinterop only binds Objective-C). With a submodule, answering that is `rg` against local source at the *exact pinned version* — including for an AI coding agent working in this repo, which can grep a checked-out submodule the same way a human would, with no network round-trip and no guessing at API shape from documentation that lags releases. That's exactly the trap that cost people weeks of dead-end debugging in the linked issue. A plain versioned dependency gives up that local grep-ability: reading the actual source now means a separate temporary clone (e.g. `git clone --branch v11.26.0 https://github.com/mapbox/mapbox-maps-ios`) or digging through SwiftPM's package cache, rather than a folder already sitting in the working tree.
 
-- **Version gap.** The submodule pins Kotlin `1.7.20` and AGP `8.10.1` (via its own `com.mapbox.gradle.library` convention plugin, which applies the classic `com.android.library`, not the AGP 9 KMP-native plugin this repo uses), against this repo's Kotlin `2.4.10` / AGP `9.2.1`. A composite build runs every included build under one Gradle version — whichever invoked the outer build — so the submodule's own Gradle wrapper pin would be ignored and its Kotlin Gradle Plugin 1.7.20 would have to load on whatever recent Gradle version AGP 9.2.1 needs. Given KGP 1.7.20 predates several Gradle API removals since, that's a real risk of a hard failure, "fixable" only by patching the submodule's own version catalog — which turns a clean pinned checkout into a fork.
+We moved off submodules anyway. A few hundred MB of clone and submodule pointers that need bumping deliberately is an ongoing cost for a benefit — local source browsing — that's occasional rather than constant, and it never even applied to Android in a build sense (see below). If this repo's day-to-day work goes back to being mostly "reverse-engineer an undocumented Swift API," reintroducing the iOS submodule is a one-line, fully reversible change — swap the `.package(url:, exact:)` line in `mapbox/native/Package.swift` back to `.package(path: "../../submodules/mapbox-maps-ios")` and re-add the submodule.
+
+## Why we don't vendor mapbox-maps-android at all
+
+Building it from source (a Gradle composite build) isn't viable and wouldn't have reached the part that matters even with a submodule in place:
+
+- **Version gap.** Its `:maps-sdk` module pins Kotlin `1.7.20` and AGP `8.10.1` (via its own `com.mapbox.gradle.library` convention plugin, which applies the classic `com.android.library`, not the AGP 9 KMP-native plugin this repo uses), against this repo's Kotlin `2.4.10` / AGP `9.2.1`. Linking it in would mean a Gradle composite build — `includeBuild("mapbox-maps-android") { dependencySubstitution { substitute(module("com.mapbox.maps:android")).using(project(":maps-sdk")) } }` — and a composite build runs every included build under one Gradle version, whichever invoked the outer build. That means its Kotlin Gradle Plugin 1.7.20 would have to load on whatever recent Gradle version AGP 9.2.1 needs, and KGP 1.7.20 predates several Gradle API removals since — a real risk of a hard failure, "fixable" only by patching its version catalog, which turns a clean pinned checkout into a fork.
 - **It doesn't reach the part that matters.** `:maps-sdk`'s dependency graph bottoms out at `:sdk-base`, whose `glNative { configuration = "api" }` pulls `com.mapbox.maps:android-core:11.27.1` — a prebuilt AAR containing the closed-source C++ rendering engine — from Maven regardless. Mapbox doesn't publish that engine's source at all, so "building from source" would only ever reach the thin Kotlin wrapper/plugin layer (`:maps-sdk`, `:sdk-base`, `:plugin-*`, `:extension-*`), not remove any actual binary dependency.
 
-So: `api("com.mapbox.maps:android:11.27.1")`, and the submodule stays checked out purely as a local reference for exploring the API surface.
+So: `api("com.mapbox.maps:android:11.27.1")`, full stop. If you need to read the Android SDK's source, a temporary `git clone --branch v11.27.1 https://github.com/mapbox/mapbox-maps-android` works the same way the iOS one does above.
 
 ## Integrating into your own app
 
@@ -141,7 +145,7 @@ implementation("dev.mapboxkmp:mapbox:0.1.0-SNAPSHOT")
 
 **iOS is subtler, and worth understanding rather than assuming.** Kotlin's `swiftPMDependencies` is designed to propagate transitively through a published klib — verified here by adding a throwaway consumer module that depended on the mavenLocal artifact *without declaring `swiftPMDependencies` itself*: Gradle still registered `embedAndSignAppleFrameworkForXcode`/`integrateLinkagePackage` for it and picked up `MapboxShim` automatically, with no extra configuration. So the propagation mechanism genuinely works. But the metadata baked into the published artifact records *how `:mapbox` itself declared the `MapboxShim` dependency* — via `localSwiftPackage(directory = layout.projectDirectory.dir("native"), ...)`, i.e. a local filesystem path. Inspecting that serialized metadata directly shows it: the dependency is recorded with the publishing machine's absolute path to `mapbox/native` baked in verbatim. That path only resolves on a machine where this repo happens to be checked out at that exact location — not true for an arbitrary consumer, so on any other machine the transitive linkage silently has nothing valid to resolve.
 
-This is a different local-vs-remote question than "Submodules vs. versioning" above — that one was about `MapboxShim`'s *own* dependency on `mapbox-maps-ios`, internal to `mapbox/native/Package.swift` and invisible to Kotlin/Gradle. This one is about how `mapbox/build.gradle.kts` declares *its* dependency on the `MapboxShim` package. Making that portable means hosting `MapboxShim` as its own versioned, tagged package (its own repo) and switching to the DSL's remote form:
+This is a different local-vs-remote question than "Versioned dependencies, not submodules" above — that one was about `MapboxShim`'s *own* dependency on `mapbox-maps-ios`, internal to `mapbox/native/Package.swift` and invisible to Kotlin/Gradle. This one is about how `mapbox/build.gradle.kts` declares *its* dependency on the `MapboxShim` package. Making that portable means hosting `MapboxShim` as its own versioned, tagged package (its own repo) and switching to the DSL's remote form:
 
 ```kotlin
 swiftPMDependencies {
@@ -157,7 +161,7 @@ That's a real restructuring (splitting the shim into its own repo), not a config
 
 ### Option B: git submodule + Gradle composite build
 
-Add this repo as a submodule of the consumer, then wire it in with `includeBuild` + dependency substitution — the same recipe discussed (and rejected, for different reasons) for the Android submodule above:
+Add this repo as a submodule of the consumer, then wire it in with `includeBuild` + dependency substitution — the same recipe discussed (and rejected, for different reasons) for `mapbox-maps-android` above:
 
 ```kotlin
 // consumer's settings.gradle.kts
@@ -168,20 +172,19 @@ includeBuild("submodules/mapbox-maps-kmp") {
 }
 ```
 
-Unlike `mapbox-maps-android`, there's no version-gap problem here — this repo already targets a current Kotlin (`2.4.10`) and AGP (`9.2.1`), so a consumer on a comparably current toolchain should compose cleanly under one Gradle version. Two things to account for:
+Unlike `mapbox-maps-android`, there's no version-gap problem here — this repo already targets a current Kotlin (`2.4.10`) and AGP (`9.2.1`), so a consumer on a comparably current toolchain should compose cleanly under one Gradle version. Also unlike the earlier version of this repo, there's no *nested* submodule to worry about either — this repo no longer vendors `mapbox-maps-ios` as a submodule itself (see "Versioned dependencies, not submodules" above), so a plain `git submodule update --init` at the consumer's top level is all that's needed; SwiftPM resolves `mapbox-maps-ios` remotely regardless of how this repo itself was obtained.
 
-- **Nested submodules.** This repo has its own submodules (`submodules/mapbox-maps-ios`, needed by the build; `submodules/mapbox-maps-android`, reference-only). Adding it as a submodule-of-a-submodule needs `git submodule update --init --recursive` at the consumer's top level to pull both layers.
-- **iOS linkage still has to happen at the consumer's own app module.** `swiftPMDependencies`'s linkage package is generated relative to whichever Gradle module produces the final iOS framework, so the consumer's iOS-facing module still needs to run the same `embedAndSignAppleFrameworkForXcode` / `integrateLinkagePackage` steps documented below for `demo/iosApp`, against their own Xcode project. That requirement doesn't go away with a composite build — what does go away is Option A's portability problem, since Gradle now resolves `mapbox/native` from the actual submodule checkout on the consumer's own disk, not from baked-in publish-time metadata.
+One thing doesn't go away with a composite build: **iOS linkage still has to happen at the consumer's own app module.** `swiftPMDependencies`'s linkage package is generated relative to whichever Gradle module produces the final iOS framework, so the consumer's iOS-facing module still needs to run the same `embedAndSignAppleFrameworkForXcode` / `integrateLinkagePackage` steps documented below for `demo/iosApp`, against their own Xcode project. What a composite build *does* solve over Option A is the portability problem — Gradle resolves `mapbox/native` from the actual submodule checkout on the consumer's own disk, not from baked-in publish-time metadata.
 
-Given this repo mirrors "The agentic argument" made above for its own submodules — everything here is still a thin, fast-moving facade over two native SDKs under active development — a submodule is probably the more honest choice for a downstream app too, at least until `MapboxShim` is split out as its own hosted package and this module gets a real release process.
+Given everything here is still a thin, fast-moving facade over two native SDKs under active development, a submodule is a reasonable choice for a downstream app that wants to track this repo closely — at least until `MapboxShim` is split out as its own hosted package and this module gets a real release process.
 
 ## Getting the code
 
 ```bash
-git clone --recurse-submodules <this-repo-url>
-# or, if already cloned:
-git submodule update --init --recursive
+git clone <this-repo-url>
 ```
+
+No submodules to initialize — SwiftPM fetches `mapbox-maps-ios` itself on first build.
 
 ## Building the Android demo
 
