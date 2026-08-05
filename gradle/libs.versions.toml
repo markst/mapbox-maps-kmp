@@ -1,0 +1,27 @@
+[versions]
+agp = "9.3.1"
+kotlin = "2.4.10" # required for `swiftPMDependencies` (Kotlin/Native Swift import)
+compose-multiplatform = "1.11.1"
+compose-material3 = "1.11.0-alpha07" # Material3's own release train, not the CMP plugin version
+androidx-activity-compose = "1.11.0"
+androidx-appcompat = "1.7.1"
+androidx-core-ktx = "1.17.0"
+mapbox-android = "11.27.1"
+
+[libraries]
+mapbox-android = { module = "com.mapbox.maps:android", version.ref = "mapbox-android" }
+mapbox-android-ndk27 = { module = "com.mapbox.maps:android-ndk27", version.ref = "mapbox-android" }
+androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "androidx-appcompat" }
+androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidx-core-ktx" }
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity-compose" }
+compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "compose-multiplatform" }
+compose-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "compose-multiplatform" }
+compose-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "compose-multiplatform" }
+compose-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "compose-material3" }
+
+[plugins]
+androidKotlinMultiplatformLibrary = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
+androidApplication = { id = "com.android.application", version.ref = "agp" }
+kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "compose-multiplatform" }
+composeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
