@@ -49,9 +49,8 @@ kotlin {
     swiftPMDependencies {
         iosMinimumDeploymentTarget = "14.0"
 
-        // @objc shim over the mapbox-maps-ios submodule. See mapbox/native/Package.swift
-        // and README "Submodules vs. versioning" for why this is a path dependency onto
-        // a pinned submodule rather than a versioned remote package.
+        // @objc shim over the versioned mapbox-maps-ios remote package. See
+        // mapbox/native/Package.swift and README "Versioned dependencies, not submodules".
         localSwiftPackage(
             directory = layout.projectDirectory.dir("native"),
             products = listOf("MapboxShim"),

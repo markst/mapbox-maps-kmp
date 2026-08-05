@@ -1,6 +1,0 @@
-[submodule "submodules/mapbox-maps-ios"]
-	path = submodules/mapbox-maps-ios
-	url = https://github.com/mapbox/mapbox-maps-ios.git
-[submodule "submodules/mapbox-maps-android"]
-	path = submodules/mapbox-maps-android
-	url = https://github.com/mapbox/mapbox-maps-android.git

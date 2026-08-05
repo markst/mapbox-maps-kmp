@@ -11,9 +11,10 @@ let package = Package(
         )
     ],
     dependencies: [
-        // Path dependency onto the pinned submodule, not a versioned remote package.
-        // See root README "Submodules vs. versioning" for why.
-        .package(path: "../../submodules/mapbox-maps-ios")
+        // Versioned remote package, not a submodule. See root README "Versioned
+        // dependencies, not submodules" for why. `exact:` (not `from:`) because the point is a
+        // single, deliberately-bumped pin, not a floating semver range.
+        .package(url: "https://github.com/mapbox/mapbox-maps-ios.git", exact: "11.26.0")
     ],
     targets: [
         .target(
