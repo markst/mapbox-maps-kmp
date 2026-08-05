@@ -25,7 +25,7 @@ graph TD
 
 ## Version matrix
 
-- Kotlin `2.4.10`, Gradle `9.6.1`, AGP `9.3.1`, Compose Multiplatform `1.11.1`
+- Kotlin `2.4.10`, Gradle `9.6.1`, AGP `9.2.1`, Compose Multiplatform `1.11.1`
 - Mapbox Android `11.27.1`, Mapbox iOS `11.26.0` (not released in lockstep; nearest pair)
 - iOS deployment target `14.0`, matching `MapboxMaps`' `platforms: [.iOS(.v14)]`
 
@@ -114,7 +114,7 @@ Both forms give the same strictness — a submodule pointer and a semver `from:`
 
 **Why Android's submodule stays out of the build**: linking it would mean a Gradle composite build — `includeBuild("submodules/mapbox-maps-android") { dependencySubstitution { substitute(module("com.mapbox.maps:android")).using(project(":maps-sdk")) } }` — plus its nested `pluginManagement { includeBuild("mapbox-convention-plugin") }`, which Gradle does support chaining through. Two things make it not worth doing:
 
-- **Version gap.** The submodule pins Kotlin `1.7.20` and AGP `8.10.1` (via its own `com.mapbox.gradle.library` convention plugin, which applies the classic `com.android.library`, not the AGP 9 KMP-native plugin this repo uses), against this repo's Kotlin `2.4.10` / AGP `9.3.1`. A composite build runs every included build under one Gradle version — whichever invoked the outer build — so the submodule's own Gradle wrapper pin would be ignored and its Kotlin Gradle Plugin 1.7.20 would have to load on whatever recent Gradle version AGP 9.3.1 needs. Given KGP 1.7.20 predates several Gradle API removals since, that's a real risk of a hard failure, "fixable" only by patching the submodule's own version catalog — which turns a clean pinned checkout into a fork.
+- **Version gap.** The submodule pins Kotlin `1.7.20` and AGP `8.10.1` (via its own `com.mapbox.gradle.library` convention plugin, which applies the classic `com.android.library`, not the AGP 9 KMP-native plugin this repo uses), against this repo's Kotlin `2.4.10` / AGP `9.2.1`. A composite build runs every included build under one Gradle version — whichever invoked the outer build — so the submodule's own Gradle wrapper pin would be ignored and its Kotlin Gradle Plugin 1.7.20 would have to load on whatever recent Gradle version AGP 9.2.1 needs. Given KGP 1.7.20 predates several Gradle API removals since, that's a real risk of a hard failure, "fixable" only by patching the submodule's own version catalog — which turns a clean pinned checkout into a fork.
 - **It doesn't reach the part that matters.** `:maps-sdk`'s dependency graph bottoms out at `:sdk-base`, whose `glNative { configuration = "api" }` pulls `com.mapbox.maps:android-core:11.27.1` — a prebuilt AAR containing the closed-source C++ rendering engine — from Maven regardless. Mapbox doesn't publish that engine's source at all, so "building from source" would only ever reach the thin Kotlin wrapper/plugin layer (`:maps-sdk`, `:sdk-base`, `:plugin-*`, `:extension-*`), not remove any actual binary dependency.
 
 So: `api("com.mapbox.maps:android:11.27.1")`, and the submodule stays checked out purely as a local reference for exploring the API surface.

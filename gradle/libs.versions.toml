@@ -1,5 +1,5 @@
 [versions]
-agp = "9.3.1"
+agp = "9.2.1"
 kotlin = "2.4.10" # required for `swiftPMDependencies` (Kotlin/Native Swift import)
 compose-multiplatform = "1.11.1"
 compose-material3 = "1.11.0-alpha07" # Material3's own release train, not the CMP plugin version
