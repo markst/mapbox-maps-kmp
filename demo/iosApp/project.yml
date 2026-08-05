@@ -1,3 +1,8 @@
+# Not used to generate the project anymore — DemoApp.xcodeproj is checked into git and
+# hand-maintained going forward. Kept only as a record of how it was originally scaffolded
+# (via `xcodegen generate`); see root README "Building the iOS demo". If you regenerate from
+# this file, you'll wipe the swiftPMDependencies linkage wiring and need to re-run
+# `./gradlew :demo:shared:integrateLinkagePackage` afterward.
 name: DemoApp
 options:
   bundleIdPrefix: dev.mapboxkmp.demo

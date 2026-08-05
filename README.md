@@ -193,32 +193,35 @@ Requires an Android SDK (`local.properties` → `sdk.dir=...`, or `ANDROID_HOME`
 
 ## Building the iOS demo
 
-Requires Xcode and [xcodegen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`) — the `.xcodeproj` isn't hand-maintained; it's generated from `demo/iosApp/project.yml`.
+Requires only Xcode. `demo/iosApp/DemoApp.xcodeproj` is checked into git and hand-maintained going forward — no project-generation tool needed to build it.
 
 ```bash
 # 1. Fill in your token
 cp demo/iosApp/Config/Local.xcconfig.example demo/iosApp/Config/Local.xcconfig
 $EDITOR demo/iosApp/Config/Local.xcconfig
 
-# 2. Generate the Xcode project
-cd demo/iosApp && xcodegen generate
-
-# 3. One-time: wire the swiftPMDependencies synthetic linkage package into the generated project
-cd ../.. && XCODEPROJ_PATH="$PWD/demo/iosApp/DemoApp.xcodeproj" \
-  ./gradlew :demo:shared:integrateLinkagePackage
-
-# 4. Build (or open DemoApp.xcodeproj and hit Run)
+# 2. Build (or open DemoApp.xcodeproj and hit Run)
 cd demo/iosApp && xcodebuild -project DemoApp.xcodeproj -scheme DemoApp \
   -destination 'platform=iOS Simulator,name=<a simulator you have>' build
 ```
 
-Step 3 only needs re-running when the set of `swiftPMDependencies` changes, or after regenerating `DemoApp.xcodeproj` from scratch with `xcodegen` (regeneration replaces the whole `.pbxproj`, wiping the wiring). It mutates `project.pbxproj` to add a local package reference to a generated `KotlinMultiplatformLinkedPackage/` directory (gitignored — it's a build artifact, regenerated on demand; the `.pbxproj`'s reference to it is what's tracked) and drops that package's product into the target's **Frameworks** build phase.
+`Local.xcconfig` is wired in via the target's `baseConfigurationReference`, and `Info.plist`'s `MBXAccessToken` key holds the literal string `$(MAPBOX_PUBLIC_TOKEN)` — Xcode substitutes that from whichever xcconfig is active for the current build configuration. Both are native Xcode build-setting mechanics with no dependency on how the project itself was created.
 
-A build-phase script (`preBuildScripts` in `project.yml`) runs `./gradlew :demo:shared:embedAndSignAppleFrameworkForXcode` before every Xcode build, so the Kotlin/Compose side is always rebuilt as part of a normal Xcode build — no separate manual Gradle step needed day to day.
+A build-phase script already wired into the project runs `./gradlew :demo:shared:embedAndSignAppleFrameworkForXcode` before every Xcode build, so the Kotlin/Compose side is always rebuilt as part of a normal Xcode build — no separate manual Gradle step needed day to day.
+
+### If you ever need to change the set of Swift packages
+
+The project was originally scaffolded with [xcodegen](https://github.com/yonaskolb/XcodeGen) from `demo/iosApp/project.yml` — kept in the repo as a record of that scaffolding, not as part of the normal build — then had the `swiftPMDependencies` linkage package wired in via:
+
+```bash
+XCODEPROJ_PATH="$PWD/demo/iosApp/DemoApp.xcodeproj" ./gradlew :demo:shared:integrateLinkagePackage
+```
+
+That mutates `project.pbxproj` directly (it doesn't need xcodegen, or even a project that came from xcodegen) to add a local package reference to a generated `KotlinMultiplatformLinkedPackage/` directory (gitignored — a build artifact regenerated on demand; the `.pbxproj`'s reference to it is what's tracked) and drop that package's product into the target's **Frameworks** build phase. Only re-run this if `mapbox/build.gradle.kts` or `demo/shared/build.gradle.kts`'s `swiftPMDependencies` set changes — the already-committed project doesn't need it for a normal build, and re-running `xcodegen generate` against `project.yml` would wipe this wiring and require redoing it.
 
 ### Xcode integration gotcha: the Frameworks build phase must already exist
 
-`integrateLinkagePackage` *appends* the linkage package's product into an existing `PBXFrameworksBuildPhase` — it doesn't create one. If the app target has no other linked frameworks (ours didn't, originally), xcodegen never emits that build phase, the mutation silently leaves the product reference orphaned, and the final link fails with an undefined symbol for whatever `@objc` class the Swift shim defines (`MapboxMapController` in this case) — with no warning that the package wasn't actually linked. `project.yml` works around this by declaring an explicit (otherwise-unused) `UIKit.framework` dependency on the target purely so xcodegen creates a real Frameworks phase for the Gradle mutation to append into.
+`integrateLinkagePackage` *appends* the linkage package's product into an existing `PBXFrameworksBuildPhase` — it doesn't create one. Our target's Frameworks phase exists only because of an explicit (otherwise-unused) `UIKit.framework` dependency added for exactly this reason; without it, the phase wouldn't exist, the mutation would silently leave the product reference orphaned, and the final link would fail with an undefined symbol for whatever `@objc` class the Swift shim defines (`MapboxMapController` here) — with no warning that the package wasn't actually linked.
 
 If you ever see `Undefined symbols for architecture ...: "_OBJC_CLASS_$_..."` after running `integrateLinkagePackage`, check the target's build phases for a Frameworks phase before anything else.
 
