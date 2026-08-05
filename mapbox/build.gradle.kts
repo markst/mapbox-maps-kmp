@@ -5,7 +5,15 @@ import org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFramework
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidKotlinMultiplatformLibrary)
+    `maven-publish`
 }
+
+// Consumed as `dev.mapboxkmp:mapbox:0.1.0-SNAPSHOT` — see README "Integrating into your own
+// app". The Kotlin Gradle plugin auto-creates a publication per target (metadata, android,
+// iosArm64, iosSimulatorArm64) once `maven-publish` is applied; no explicit `publishing {}`
+// block is needed for that part.
+group = "dev.mapboxkmp"
+version = "0.1.0-SNAPSHOT"
 
 kotlin {
     compilerOptions {

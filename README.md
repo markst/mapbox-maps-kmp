@@ -119,6 +119,62 @@ Both forms give the same strictness — a submodule pointer and a semver `from:`
 
 So: `api("com.mapbox.maps:android:11.27.1")`, and the submodule stays checked out purely as a local reference for exploring the API surface.
 
+## Integrating into your own app
+
+`:mapbox` isn't published anywhere yet, but two paths get it into a separate app, with different trade-offs.
+
+### Option A: publish to mavenLocal
+
+`mapbox/build.gradle.kts` applies `maven-publish` with `group = "dev.mapboxkmp"` and `version = "0.1.0-SNAPSHOT"`. From this repo:
+
+```bash
+./gradlew :mapbox:publishToMavenLocal
+```
+
+This produces the root `dev.mapboxkmp:mapbox:0.1.0-SNAPSHOT` metadata artifact plus per-target variants (`mapbox-android`, `mapbox-iosarm64`, `mapbox-iossimulatorarm64`) under `~/.m2/repository`; Gradle picks the right one per target automatically. In the consumer app, add `mavenLocal()` to `settings.gradle.kts`'s `dependencyResolutionManagement.repositories`, then depend on it from a shared/commonMain source set:
+
+```kotlin
+implementation("dev.mapboxkmp:mapbox:0.1.0-SNAPSHOT")
+```
+
+**Android just works** — `:mapbox` depends on the Mapbox Android SDK via `api`, so it's transitively on the consumer's classpath too.
+
+**iOS is subtler, and worth understanding rather than assuming.** Kotlin's `swiftPMDependencies` is designed to propagate transitively through a published klib — verified here by adding a throwaway consumer module that depended on the mavenLocal artifact *without declaring `swiftPMDependencies` itself*: Gradle still registered `embedAndSignAppleFrameworkForXcode`/`integrateLinkagePackage` for it and picked up `MapboxShim` automatically, with no extra configuration. So the propagation mechanism genuinely works. But the metadata baked into the published artifact records *how `:mapbox` itself declared the `MapboxShim` dependency* — via `localSwiftPackage(directory = layout.projectDirectory.dir("native"), ...)`, i.e. a local filesystem path. Inspecting that serialized metadata directly shows it: the dependency is recorded with the publishing machine's absolute path to `mapbox/native` baked in verbatim. That path only resolves on a machine where this repo happens to be checked out at that exact location — not true for an arbitrary consumer, so on any other machine the transitive linkage silently has nothing valid to resolve.
+
+This is a different local-vs-remote question than "Submodules vs. versioning" above — that one was about `MapboxShim`'s *own* dependency on `mapbox-maps-ios`, internal to `mapbox/native/Package.swift` and invisible to Kotlin/Gradle. This one is about how `mapbox/build.gradle.kts` declares *its* dependency on the `MapboxShim` package. Making that portable means hosting `MapboxShim` as its own versioned, tagged package (its own repo) and switching to the DSL's remote form:
+
+```kotlin
+swiftPMDependencies {
+    swiftPackage(
+        url = url("https://github.com/<you>/mapbox-shim.git"),
+        version = from("0.1.0"),
+        products = listOf(product("MapboxShim")),
+    )
+}
+```
+
+That's a real restructuring (splitting the shim into its own repo), not a config tweak — so today, treat mavenLocal as Android-ready and iOS-workable-only-on-the-publishing-machine.
+
+### Option B: git submodule + Gradle composite build
+
+Add this repo as a submodule of the consumer, then wire it in with `includeBuild` + dependency substitution — the same recipe discussed (and rejected, for different reasons) for the Android submodule above:
+
+```kotlin
+// consumer's settings.gradle.kts
+includeBuild("submodules/mapbox-maps-kmp") {
+    dependencySubstitution {
+        substitute(module("dev.mapboxkmp:mapbox")).using(project(":mapbox"))
+    }
+}
+```
+
+Unlike `mapbox-maps-android`, there's no version-gap problem here — this repo already targets a current Kotlin (`2.4.10`) and AGP (`9.2.1`), so a consumer on a comparably current toolchain should compose cleanly under one Gradle version. Two things to account for:
+
+- **Nested submodules.** This repo has its own submodules (`submodules/mapbox-maps-ios`, needed by the build; `submodules/mapbox-maps-android`, reference-only). Adding it as a submodule-of-a-submodule needs `git submodule update --init --recursive` at the consumer's top level to pull both layers.
+- **iOS linkage still has to happen at the consumer's own app module.** `swiftPMDependencies`'s linkage package is generated relative to whichever Gradle module produces the final iOS framework, so the consumer's iOS-facing module still needs to run the same `embedAndSignAppleFrameworkForXcode` / `integrateLinkagePackage` steps documented below for `demo/iosApp`, against their own Xcode project. That requirement doesn't go away with a composite build — what does go away is Option A's portability problem, since Gradle now resolves `mapbox/native` from the actual submodule checkout on the consumer's own disk, not from baked-in publish-time metadata.
+
+Given this repo mirrors "The agentic argument" made above for its own submodules — everything here is still a thin, fast-moving facade over two native SDKs under active development — a submodule is probably the more honest choice for a downstream app too, at least until `MapboxShim` is split out as its own hosted package and this module gets a real release process.
+
 ## Getting the code
 
 ```bash
