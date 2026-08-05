@@ -1,0 +1,50 @@
+name: DemoApp
+options:
+  bundleIdPrefix: dev.mapboxkmp.demo
+  deploymentTarget:
+    iOS: "14.0"
+
+configFiles:
+  Debug: Config/Local.xcconfig
+  Release: Config/Local.xcconfig
+
+targets:
+  DemoApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    dependencies:
+      # No direct use of UIKit's own symbols here — this exists purely so xcodegen emits a real
+      # PBXFrameworksBuildPhase. `integrateLinkagePackage` (run after `xcodegen generate`) appends
+      # the swiftPMDependencies linkage package's PBXBuildFile into an *existing* Frameworks phase;
+      # without one already present, that entry ends up orphaned (declared but never linked) and
+      # Mapbox's Swift shim silently drops out of the final link.
+      - sdk: UIKit.framework
+    info:
+      path: Sources/Info.plist
+      properties:
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        # MapboxMaps reads its runtime token from this key. Value comes from the
+        # MAPBOX_PUBLIC_TOKEN xcconfig variable — see Config/Local.xcconfig.example and the
+        # root README's "Credentials" section. Never a literal token here.
+        MBXAccessToken: $(MAPBOX_PUBLIC_TOKEN)
+        # Required as of Compose Multiplatform 1.7+, or the app crashes on real devices.
+        CADisableMinimumFrameDurationOnPhone: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.mapboxkmp.demo.iosApp
+        PRODUCT_NAME: DemoApp
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+        ENABLE_PREVIEWS: NO
+    preBuildScripts:
+      - name: Build demo:shared (Kotlin/Compose Multiplatform)
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          cd "$SRCROOT/../.."
+          ./gradlew :demo:shared:embedAndSignAppleFrameworkForXcode

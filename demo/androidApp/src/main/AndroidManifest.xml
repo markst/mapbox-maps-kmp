@@ -1,0 +1,26 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:name=".DemoApplication"
+        android:label="MapboxKMP Demo"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
+        <!-- Populated from the untracked MAPBOX_PUBLIC_TOKEN gradle property/env var at build
+             time — see build.gradle.kts and the root README. Never a literal value here. -->
+        <meta-data
+            android:name="dev.mapboxkmp.demo.MAPBOX_PUBLIC_TOKEN"
+            android:value="${MAPBOX_PUBLIC_TOKEN}" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
