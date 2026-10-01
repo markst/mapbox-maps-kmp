@@ -9,7 +9,9 @@ androidx-core-ktx = "1.17.0"
 mapbox-android = "11.27.1"
 
 [libraries]
-mapbox-android = { module = "com.mapbox.maps:android", version.ref = "mapbox-android" }
+# `-ndk27` only. The default `com.mapbox.maps:android` artifact is an NDK 23 build whose
+# 64-bit `.so`s are 4 KB-aligned, which Google Play rejects for Android 15+ targets as of
+# 2025-11-01. Same API, same version train; deliberately not aliased so it can't creep back in.
 mapbox-android-ndk27 = { module = "com.mapbox.maps:android-ndk27", version.ref = "mapbox-android" }
 androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "androidx-appcompat" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidx-core-ktx" }

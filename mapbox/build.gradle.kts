@@ -61,7 +61,14 @@ kotlin {
         androidMain.dependencies {
             // `api`, not `implementation`: `MapboxMap.view` publicly exposes `MapView`, so
             // consumers (e.g. the demo) need `com.mapbox.maps.*` on their own classpath too.
-            api(libs.mapbox.android)
+            //
+            // `-ndk27`, not the default artifact: identical API, but built with NDK 27 so the
+            // 64-bit `.so`s (`libmapbox-maps.so`, `libmapbox-common.so`, `libc++_shared.so`)
+            // carry `p_align=0x4000`. The default `com.mapbox.maps:android` ships 4 KB-aligned
+            // binaries, which Google Play rejects for apps targeting Android 15+ since
+            // 2025-11-01. Verified: `android-core-ndk27:11.27.1` arm64-v8a/x86_64 LOAD
+            // segments are 16 KB-aligned; `android-core:11.27.1` are 4 KB.
+            api(libs.mapbox.android.ndk27)
         }
         commonMain.dependencies {
         }
