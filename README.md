@@ -15,7 +15,7 @@ graph TD
   ios["iosMain: actual — extends shim"]
   maven["com.mapbox.maps:android:11.27.1 (Maven)"]
   shim["MapboxShim @objc Swift package (local)"]
-  sdkios["mapbox-maps-ios @ 11.26.0 (remote SPM)"]
+  sdkios["mapbox-maps-ios @ 11.24.3 (remote SPM)"]
   common --> android
   common --> ios
   android --> maven
@@ -26,7 +26,7 @@ graph TD
 ## Version matrix
 
 - Kotlin `2.4.10`, Gradle `9.6.1`, AGP `9.2.1`, Compose Multiplatform `1.11.1`
-- Mapbox Android `11.27.1`, Mapbox iOS `11.26.0` (not released in lockstep; nearest pair)
+- Mapbox Android `11.27.1`, Mapbox iOS `11.24.3` (temporarily pinned to compare the iOS 11.26.0 globe-rendering regression in [#2438](https://github.com/mapbox/mapbox-maps-ios/issues/2438))
 - iOS deployment target `14.0`, matching `MapboxMaps`' `platforms: [.iOS(.v14)]`
 
 ## Repo layout
@@ -38,7 +38,7 @@ mapbox-maps-kmp/
 ├── mapbox/                      # the KMP library
 │   ├── build.gradle.kts
 │   ├── native/Package.swift     # local SPM package, consumed via swiftPMDependencies;
-│   │                            #   itself depends on mapbox-maps-ios @ 11.26.0 (remote)
+│   │                            #   itself depends on mapbox-maps-ios @ 11.24.3 (remote)
 │   ├── native/MapboxShim/*.swift
 │   └── src/{commonMain,androidMain,iosMain}/kotlin
 └── demo/                        # Compose Multiplatform demo app
@@ -68,6 +68,12 @@ expect class MapboxMap() {
 ```kotlin
 actual class MapboxMap actual constructor() : MapboxMapController()
 ```
+
+On iOS, configuration performed before `UIKitViewController` embeds the controller is retained
+until `MapView` creation. The shim supplies the requested camera through `MapInitOptions` and
+builds one style containing a local `#001426` background import below the requested basemap
+import. The background is therefore available without a network request, while the camera and
+basemap remain part of the same initial Mapbox render.
 
 ## Credentials
 
@@ -100,10 +106,10 @@ Both platforms pin to a released version rather than vendoring source in the rep
 - **iOS**: `mapbox/native/Package.swift` depends on `mapbox-maps-ios` via a plain remote SwiftPM package pin:
 
   ```swift
-  .package(url: "https://github.com/mapbox/mapbox-maps-ios.git", exact: "11.26.0")
+  .package(url: "https://github.com/mapbox/mapbox-maps-ios.git", exact: "11.24.3")
   ```
 
-  `exact:`, not `from:` — the point is a single, deliberately-bumped pin (reviewable as a one-line `git diff`), not a floating semver range that could silently resolve to a newer tag on a clean checkout. This still has to target a tagged release rather than `main`: `Package.swift` on `mapbox-maps-ios`'s `main` branch pins SNAPSHOT builds of `MapboxCommon`/`MapboxCoreMaps`, while tagged releases (like `v11.26.0`) pin real ones. Verified end to end — `swift package resolve` against this exact manifest resolves `mapbox-maps-ios` to revision `b5322aad...` (the same commit `v11.26.0` names) with real, non-SNAPSHOT `MapboxCommon`/`MapboxCoreMaps` binary artifacts. The resulting pin is what ends up in `.swiftpm-locks/default/swiftImport/Package.resolved`, which is tracked in git for reproducible resolution (see `.gitignore`'s comment on it); the SwiftPM checkout/artifact cache alongside it under `.swiftpm-locks/*/swiftPMCheckout/` is not — that's hundreds of MB of re-fetchable source and binaries, explicitly gitignored.
+  `exact:`, not `from:` — the point is a single, deliberately-bumped pin (reviewable as a one-line `git diff`), not a floating semver range that could silently resolve to a newer tag on a clean checkout. This still has to target a tagged release rather than `main`: `Package.swift` on `mapbox-maps-ios`'s `main` branch pins SNAPSHOT builds of `MapboxCommon`/`MapboxCoreMaps`, while tagged releases pin real ones. Verified end to end — `swift package resolve` against this exact manifest resolves `mapbox-maps-ios` to revision `90c6b2e3...` (the commit named by `v11.24.3`) with non-SNAPSHOT `MapboxCommon`/`MapboxCoreMaps` binary artifacts. The resulting pin is what ends up in `.swiftpm-locks/default/swiftImport/Package.resolved`, which is checked in for reproducibility.
 - **Android**: unchanged by any of this — `api("com.mapbox.maps:android:11.27.1")` from Mapbox's Maven repo, as it always was.
 
 ### The submodule alternative — considered, not taken
