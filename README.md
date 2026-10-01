@@ -13,7 +13,7 @@ graph TD
   common["commonMain: expect MapboxMap"]
   android["androidMain: actual — MapView"]
   ios["iosMain: actual — extends shim"]
-  maven["com.mapbox.maps:android:11.27.1 (Maven)"]
+  maven["com.mapbox.maps:android-ndk27:11.27.1 (Maven)"]
   shim["MapboxShim @objc Swift package (local)"]
   sdkios["mapbox-maps-ios @ 11.26.0 (remote SPM)"]
   common --> android
@@ -26,7 +26,7 @@ graph TD
 ## Version matrix
 
 - Kotlin `2.4.10`, Gradle `9.6.1`, AGP `9.2.1`, Compose Multiplatform `1.11.1`
-- Mapbox Android `11.27.1`, Mapbox iOS `11.26.0` (not released in lockstep; nearest pair)
+- Mapbox Android `11.27.1` (the `-ndk27` artifact — see "16 KB page sizes" below), Mapbox iOS `11.26.0` (not released in lockstep; nearest pair)
 - iOS deployment target `14.0`, matching `MapboxMaps`' `platforms: [.iOS(.v14)]`
 
 ## Repo layout
@@ -104,7 +104,7 @@ Both platforms pin to a released version rather than vendoring source in the rep
   ```
 
   `exact:`, not `from:` — the point is a single, deliberately-bumped pin (reviewable as a one-line `git diff`), not a floating semver range that could silently resolve to a newer tag on a clean checkout. This still has to target a tagged release rather than `main`: `Package.swift` on `mapbox-maps-ios`'s `main` branch pins SNAPSHOT builds of `MapboxCommon`/`MapboxCoreMaps`, while tagged releases (like `v11.26.0`) pin real ones. Verified end to end — `swift package resolve` against this exact manifest resolves `mapbox-maps-ios` to revision `b5322aad...` (the same commit `v11.26.0` names) with real, non-SNAPSHOT `MapboxCommon`/`MapboxCoreMaps` binary artifacts. The resulting pin is what ends up in `.swiftpm-locks/default/swiftImport/Package.resolved`, which is tracked in git for reproducible resolution (see `.gitignore`'s comment on it); the SwiftPM checkout/artifact cache alongside it under `.swiftpm-locks/*/swiftPMCheckout/` is not — that's hundreds of MB of re-fetchable source and binaries, explicitly gitignored.
-- **Android**: unchanged by any of this — `api("com.mapbox.maps:android:11.27.1")` from Mapbox's Maven repo, as it always was.
+- **Android**: unchanged by any of this — `api("com.mapbox.maps:android-ndk27:11.27.1")` from Mapbox's Maven repo, as it always was.
 
 ### The submodule alternative — considered, not taken
 
@@ -119,9 +119,25 @@ We moved off submodules anyway. A few hundred MB of clone and submodule pointers
 Building it from source (a Gradle composite build) isn't viable and wouldn't have reached the part that matters even with a submodule in place:
 
 - **Version gap.** Its `:maps-sdk` module pins Kotlin `1.7.20` and AGP `8.10.1` (via its own `com.mapbox.gradle.library` convention plugin, which applies the classic `com.android.library`, not the AGP 9 KMP-native plugin this repo uses), against this repo's Kotlin `2.4.10` / AGP `9.2.1`. Linking it in would mean a Gradle composite build — `includeBuild("mapbox-maps-android") { dependencySubstitution { substitute(module("com.mapbox.maps:android")).using(project(":maps-sdk")) } }` — and a composite build runs every included build under one Gradle version, whichever invoked the outer build. That means its Kotlin Gradle Plugin 1.7.20 would have to load on whatever recent Gradle version AGP 9.2.1 needs, and KGP 1.7.20 predates several Gradle API removals since — a real risk of a hard failure, "fixable" only by patching its version catalog, which turns a clean pinned checkout into a fork.
-- **It doesn't reach the part that matters.** `:maps-sdk`'s dependency graph bottoms out at `:sdk-base`, whose `glNative { configuration = "api" }` pulls `com.mapbox.maps:android-core:11.27.1` — a prebuilt AAR containing the closed-source C++ rendering engine — from Maven regardless. Mapbox doesn't publish that engine's source at all, so "building from source" would only ever reach the thin Kotlin wrapper/plugin layer (`:maps-sdk`, `:sdk-base`, `:plugin-*`, `:extension-*`), not remove any actual binary dependency.
+- **It doesn't reach the part that matters.** `:maps-sdk`'s dependency graph bottoms out at `:sdk-base`, whose `glNative { configuration = "api" }` pulls `com.mapbox.maps:android-core[-ndk27]:11.27.1` — a prebuilt AAR containing the closed-source C++ rendering engine — from Maven regardless. Mapbox doesn't publish that engine's source at all, so "building from source" would only ever reach the thin Kotlin wrapper/plugin layer (`:maps-sdk`, `:sdk-base`, `:plugin-*`, `:extension-*`), not remove any actual binary dependency.
 
-So: `api("com.mapbox.maps:android:11.27.1")`, full stop. If you need to read the Android SDK's source, a temporary `git clone --branch v11.27.1 https://github.com/mapbox/mapbox-maps-android` works the same way the iOS one does above.
+So: `api("com.mapbox.maps:android-ndk27:11.27.1")`, full stop. If you need to read the Android SDK's source, a temporary `git clone --branch v11.27.1 https://github.com/mapbox/mapbox-maps-android` works the same way the iOS one does above.
+
+## 16 KB page sizes
+
+Google Play rejects apps targeting Android 15+ that ship 64-bit native libraries which aren't 16 KB-aligned (new apps and updates submitted from 2025-11-01 onward). `:mapbox` has no native code of its own, but it drags Mapbox's in transitively, and **Mapbox publishes two variants of every artifact**: the default (`com.mapbox.maps:android`, an NDK 23 build) and `-ndk27`. Same version train, same Kotlin API, different toolchain — only the `-ndk27` build is 16 KB-aligned. Mapbox has shipped both since `11.7.0`/`10.19.0` and does not plan to realign the default one.
+
+`gradle/libs.versions.toml` therefore aliases `-ndk27` *only*, so the 4 KB artifact can't be reintroduced by autocompleting `libs.mapbox.android`. Verified on the release APK of `:demo:androidApp`, which pulls the whole Mapbox graph transitively through `:mapbox`:
+
+| `lib/<abi>/` | `libmapbox-maps.so` | `libmapbox-common.so` | `libc++_shared.so` |
+| --- | --- | --- | --- |
+| `arm64-v8a` | `p_align=0x4000` | `0x4000` | `0x4000` |
+| `x86_64` | `0x4000` | `0x4000` | `0x4000` |
+| `armeabi-v7a`, `x86` | `0x1000` | `0x1000` | `0x1000` |
+
+The 32-bit ABIs stay 4 KB-aligned in the `-ndk27` artifacts too; that's fine, the requirement is 64-bit only. For reference, `com.mapbox.maps:android-core:11.27.1` (the default artifact) is `p_align=0x1000` on *every* ABI including `arm64-v8a` — that's the rejection.
+
+The other half of the requirement is zip-level: with `extractNativeLibs=false` (AGP's default since 8.x) the `.so`s are mapped straight out of the APK, so their entries must be stored uncompressed at 16 KB-aligned offsets. AGP 9.2.1 does this on its own — `zipalign -c -P 16 -v 4` on the release APK reports `Verification successful`, no `packaging {}` block required.
 
 ## Integrating into your own app
 
