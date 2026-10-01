@@ -19,7 +19,7 @@ let package = Package(
         // Versioned remote package, not a submodule. See root README "Versioned
         // dependencies, not submodules" for why. `exact:` (not `from:`) because the point is a
         // single, deliberately-bumped pin, not a floating semver range.
-        .package(url: "https://github.com/mapbox/mapbox-maps-ios.git", exact: "11.26.0")
+        .package(url: "https://github.com/mapbox/mapbox-maps-ios.git", exact: "11.24.3")
     ],
     targets: [
         .target(
