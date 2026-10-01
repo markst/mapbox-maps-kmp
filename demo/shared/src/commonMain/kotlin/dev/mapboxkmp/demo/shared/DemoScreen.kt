@@ -35,9 +35,9 @@ fun DemoScreen() {
                         modifier = Modifier.fillMaxSize(),
                         configure = { map ->
                             map.onStyleLoaded { status = "Style loaded" }
-                            map.setStyleUri("mapbox://styles/mapbox/streets-v12")
+                            // map.setStyleUri("mapbox://styles/mapbox/standard")
                             map.setCamera(
-                                CameraPosition(latitude = 51.5074, longitude = -0.1278, zoom = 11.0)
+                                CameraPosition(latitude = 51.5074, longitude = -0.1278, zoom = 1.0)
                             )
                         },
                     )
